@@ -99,6 +99,8 @@ namespace DesignPatternChallenge
         public PaymentResult ProcessPayment(PaymentRequest request)
         {
             Console.WriteLine("[Processador Moderno] Processando pagamento...");
+
+            
             return new PaymentResult
             {
                 Success = true,
@@ -158,6 +160,57 @@ namespace DesignPatternChallenge
         }
     }
 
+    public class AdapterPaymentProcessor: IPaymentProcessor
+    {
+        private readonly LegacyPaymentSystem _legacyPaymentSystem;
+
+        public AdapterPaymentProcessor(LegacyPaymentSystem legacyPaymentSystem)
+        {
+            _legacyPaymentSystem = legacyPaymentSystem;
+        }
+
+        public PaymentResult ProcessPayment(PaymentRequest request)
+        {
+            Console.WriteLine("[Adaptador] Processando pagamento...");
+
+            var response = _legacyPaymentSystem.AuthorizeTransaction(
+                request.CreditCardNumber,
+                int.Parse(request.Cvv),
+                request.ExpirationDate.Month,
+                request.ExpirationDate.Year,
+                (double)(request.Amount * 100),
+                request.CustomerEmail);
+
+            return new PaymentResult
+            {
+                Success = response.ResponseCode == "00",
+                TransactionId = response.TransactionRef,
+                Message = response.ResponseMessage
+            };
+        }
+
+        public bool RefundPayment(string transactionId, decimal amount)
+        {
+            Console.WriteLine($"[Adaptador] Reembolsando {amount:C}");
+
+            var response = _legacyPaymentSystem.ReverseTransaction(transactionId, (double)(amount * 100));
+            return response;
+        }
+
+        public PaymentStatus CheckStatus(string transactionId)
+        {
+            var response = _legacyPaymentSystem.QueryTransactionStatus(transactionId);
+            return response switch 
+            {
+                "APPROVED" => PaymentStatus.Approved,
+                "DECLINED" => PaymentStatus.Declined,
+                "PENDING" => PaymentStatus.Pending,
+                "REFUNDED" => PaymentStatus.Refunded,
+                _ => throw new Exception("Status desconhecido")
+            };
+        }
+    }
+
     class Program
     {
         static void Main(string[] args)
@@ -173,38 +226,11 @@ namespace DesignPatternChallenge
 
             // Problema: Como usar o sistema legado sem modificar CheckoutService?
             var legacySystem = new LegacyPaymentSystem();
+            var adapter = new AdapterPaymentProcessor(legacySystem);
+            var checkoutWithLegacy = new CheckoutService(adapter);
+            checkoutWithLegacy.CompleteOrder("cliente@email.com", 150.00m, "4111111111111111");
             
-            // ISSO NÃO FUNCIONA - Interfaces incompatíveis
-            // var checkoutWithLegacy = new CheckoutService(legacySystem); // ERRO DE COMPILAÇÃO!
-
-            Console.WriteLine("⚠️ PROBLEMA: Sistema legado não implementa IPaymentProcessor");
-            Console.WriteLine("   - Assinaturas de métodos incompatíveis");
-            Console.WriteLine("   - Estruturas de dados diferentes");
-            Console.WriteLine("   - Não podemos modificar o código legado");
-            Console.WriteLine("   - Não queremos modificar CheckoutService");
-
-            // Tentativa ingênua: criar wrapper manualmente em cada lugar
-            Console.WriteLine("\n--- Tentativa de uso direto (código duplicado) ---\n");
-            
-            var cardNumber = "4111111111111111";
-            var cvv = 123;
-            var expDate = new DateTime(2026, 12, 31);
-            var amount = 200.00m;
-
-            // Conversões manuais repetidas em cada lugar do código
-            var legacyResponse = legacySystem.AuthorizeTransaction(
-                cardNumber,
-                cvv,
-                expDate.Month,
-                expDate.Year,
-                (double)(amount * 100),
-                "cliente2@email.com"
-            );
-
-            if (legacyResponse.ResponseCode == "00")
-            {
-                Console.WriteLine($"✅ Transação aprovada! Ref: {legacyResponse.TransactionRef}");
-            }
+           
 
             // Perguntas para reflexão:
             // - Como fazer o sistema legado trabalhar com a interface moderna?
